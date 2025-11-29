@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+      "declaration": true,
+      "esModuleInterop": true,
+      "outDir": "./dist",
+      "types": [
+          "./declaration.d.ts"
+      ],
+      "module": "CommonJS",
+      "target": "ESNext",
+      "moduleResolution": "node",
+      "strict": true,
+      "resolveJsonModule": true
+  }
+}
