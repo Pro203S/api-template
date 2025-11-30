@@ -1,6 +1,7 @@
 # API
 
 - 개인용 Express.js API 템플릿
+- dotenv 내장
 
 ## 시작하기
 
