@@ -1,4 +1,10 @@
 declare global {
+    namespace NodeJS {
+        interface ProcessEnv {
+            // readonly STRING: string;
+        }
+    }
+
     interface ServerConfig {
         name: string;
         port: number;

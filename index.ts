@@ -7,6 +7,7 @@ import config from './config.ts';
 import Logger from './modules/logger.ts';
 import { existsSync } from 'fs';
 import cron from 'node-cron';
+import us from 'microseconds';
 
 const IS_DEV = process.argv[2] === "--dev";
 
@@ -19,7 +20,7 @@ const app = express();
 app.use(express.json());
 app.use(express.text());
 
-const logger = new Logger(config.name);
+const logger = new Logger("API");
 logger.log(`Starting ${config.name}...`);
 
 function coloringStatus(status: number) {
@@ -33,7 +34,19 @@ function coloringStatus(status: number) {
     ][Math.floor(status / 100)];
 }
 
-const logResponse = (path: string, method: string, status: number) => logger.log(`${method} ${path} ${coloringStatus(status)}`);
+const parseUs = (us: number) => {
+    if (us >= 1000000) {
+        return Math.round(us / 1000000) + "s";
+    }
+
+    if (us >= 1000) {
+        return Math.round(us / 1000) + "ms";
+    }
+
+    return Math.round(us) + "μs";
+}
+
+const logResponse = (path: string, method: string, status: number, time: string) => logger.log(`${method} ${path} ${coloringStatus(status)} ` + time.gray);
 
 if (config.staticPath) {
     logger.log("Static path set to: " + path.join(__dirname, config.staticPath));
@@ -62,6 +75,7 @@ app.use(async (req, res, next) => {
             return next();
         }
 
+        //@ts-ignore
         const middleware = await import("./middleware.ts");
 
         if (
@@ -81,13 +95,14 @@ app.use(async (req, res, next) => {
             return next();
         }
 
+        const date = us.now();
         // 매치되면 사용자 미들웨어 실행
         await middleware.Middleware(req, res, next);
 
         // 이미 응답이 나갔으면 로그만 찍고 끝
         if (res.headersSent || res.writableEnded) {
             const s = res.statusCode;
-            logResponse(req.path, req.method, s);
+            logResponse(req.path, req.method, s, `[${parseUs(us.now() - date)}]`);
             return;
         }
 
@@ -120,6 +135,7 @@ const addRoutes = async (str: string) => {
         ).replaceAll("\\", "/");
 
         app.use(appRoute, async (req, res) => {
+            const date = us.now();
             try {
                 if (config.id && config.pw) {
                     if (!req.headers["authorization"]) {
@@ -151,11 +167,11 @@ const addRoutes = async (str: string) => {
                 if (!method) return res.status(405).json({ "code": 405, "message": "Method Not Allowed" });
 
                 const r = await method(req, res);
-                logResponse(req.originalUrl, req.method, r.statusCode);
+                logResponse(req.originalUrl, req.method, r.statusCode, `[${parseUs(us.now() - date)}]`);
             } catch (err: any) {
                 const e = err as Error;
                 if (e.message.includes("Cannot find module")) {
-                    logResponse(req.originalUrl, req.method, 404);
+                    logResponse(req.originalUrl, req.method, 404, `[${parseUs(us.now() - date)}]`);
                     res.status(404).json({
                         "code": 404,
                         "message": "Not Found"
@@ -165,10 +181,10 @@ const addRoutes = async (str: string) => {
 
                 if (res.headersSent || res.writableEnded) {
                     const s = res.statusCode;
-                    logResponse(req.originalUrl, req.method, s);
+                    logResponse(req.originalUrl, req.method, s, `[${parseUs(us.now() - date)}]`);
                     return;
                 }
-                logResponse(req.originalUrl, req.method, 500);
+                logResponse(req.originalUrl, req.method, 500, `[${parseUs(us.now() - date)}]`);
                 res.status(500).json({
                     "code": 500,
                     "message": e.message
@@ -185,28 +201,32 @@ const addRoutes = async (str: string) => {
 (async () => {
     logger.log("Loading schedules...");
 
-    const schedules = await fs.readdir("./schedules", "utf-8");
-    for await (const scheduleFile of schedules) {
-        try {
-            const schedule = await import(`./schedules/${scheduleFile}`);
-            if (
-                !schedule.Schedule ||
-                !schedule.interval ||
-                typeof schedule.Schedule !== "function" ||
-                typeof schedule.interval !== "string"
-            ) {
-                logger.error("schedules/" + schedule + " was corrupt. Check README.md");
-                return;
-            }
+    if (existsSync("./schedules")) {
+        const schedules = await fs.readdir("./schedules", "utf-8");
+        for await (const scheduleFile of schedules) {
+            try {
+                const schedule = await import(`./schedules/${scheduleFile}`);
+                if (
+                    !schedule.Schedule ||
+                    !schedule.interval ||
+                    typeof schedule.Schedule !== "function" ||
+                    typeof schedule.interval !== "string"
+                ) {
+                    logger.error("schedules/" + schedule + " was corrupt. Check README.md");
+                    return;
+                }
 
-            cron.schedule(schedule.interval, schedule.Schedule);
-            logger.log("Scheduled schedules/" + scheduleFile);
-            schedule.Schedule();
-        } catch (err) {
-            const e = err as Error;
-            logger.error(`An error occurred when loading schedules/${scheduleFile}`);
-            logger.error(e.message);
+                cron.schedule(schedule.interval, schedule.Schedule);
+                logger.log("Scheduled schedules/" + scheduleFile);
+                schedule.Schedule();
+            } catch (err) {
+                const e = err as Error;
+                logger.error(`An error occurred when loading schedules/${scheduleFile}`);
+                logger.error(e.message);
+            }
         }
+    } else {
+        logger.log("schedules directory not found!");
     }
 
     //app.use((req, res) => res.status(404).json({ "code": 404, "message": "Not Found" }));

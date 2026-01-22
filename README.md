@@ -13,20 +13,22 @@
 
 ## config.ts 수정
 
+```ts
 interface ServerConfig {
-        name: string;
-        port: number;
+    name: string;
+    port: number;
 
-        id?: string;
-        pw?: string;
-        browserLogin?: boolean;
+    id?: string;
+    pw?: string;
+    browserLogin?: boolean;
 
-        /**
-         * 현재 디렉토리의 상대 경로
-         */
-        staticPath?: string;
-        expressSettings?: { [key: string]: any };
-    }
+    /**
+     * 현재 디렉토리의 상대 경로
+     */
+    staticPath?: string;
+    expressSettings?: { [key: string]: any };
+}
+```
 
 config.ts는 서버 환경설정 파일입니다.  
 아래의 설정을 할 수 있습니다.  
