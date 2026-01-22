@@ -1,6 +1,6 @@
 const config: ServerConfig = {
     "name": "API-Server",
-    "port": 3000,
+    "port": 8080,
     
     //"id": "asdf2",
     //"pw": "asdf",

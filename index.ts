@@ -8,6 +8,7 @@ import Logger from './modules/logger.ts';
 import { existsSync } from 'fs';
 import cron from 'node-cron';
 import us from 'microseconds';
+import isPortInUse from './modules/getAvailablePort.ts';
 
 const IS_DEV = process.argv[2] === "--dev";
 
@@ -47,26 +48,6 @@ const parseUs = (us: number) => {
 }
 
 const logResponse = (path: string, method: string, status: number, time: string) => logger.log(`${method} ${path} ${coloringStatus(status)} ` + time.gray);
-
-if (config.staticPath) {
-    logger.log("Static path set to: " + path.join(__dirname, config.staticPath));
-    app.use(express.static(path.join(__dirname, config.staticPath)));
-}
-
-if (config.expressSettings) {
-    const keys = Object.keys(config.expressSettings);
-    for (const key of keys) {
-        const value = config.expressSettings[key];
-        app.set(key, value);
-
-        logger.log(`Set ${key} to ${value}`);
-    }
-
-    if (IS_DEV) {
-        logger.log("Set etag to false");
-        app.set("etag", false);
-    }
-}
 
 app.use(async (req, res, next) => {
     try {
@@ -199,6 +180,31 @@ const addRoutes = async (str: string) => {
 };
 
 (async () => {
+    if (await isPortInUse(config.port)) {
+        logger.error("This port is in use: " + config.port.toString().red);
+        process.exit(1);
+    }
+
+    if (config.staticPath) {
+        logger.log("Static path set to: " + path.join(__dirname, config.staticPath).toString().yellow);
+        app.use(express.static(path.join(__dirname, config.staticPath)));
+    }
+
+    if (config.expressSettings) {
+        const keys = Object.keys(config.expressSettings);
+        for (const key of keys) {
+            const value = config.expressSettings[key];
+            app.set(key, value);
+
+            logger.log(`Set ${key} to ${value}`);
+        }
+
+        if (IS_DEV) {
+            logger.log("Set etag to false");
+            app.set("etag", false);
+        }
+    }
+
     logger.log("Loading schedules...");
 
     if (existsSync("./schedules")) {
@@ -229,14 +235,12 @@ const addRoutes = async (str: string) => {
         logger.log("schedules directory not found!");
     }
 
-    //app.use((req, res) => res.status(404).json({ "code": 404, "message": "Not Found" }));
-
     logger.log("Loading routes...");
 
     await addRoutes(path.join(__dirname, "./routes"));
 
     app.listen(config.port, () => {
-        logger.log("Server listening on port " + config.port);
+        logger.log("Server listening on port " + config.port.toString().green);
         logger.log("- http://127.0.0.1:" + config.port);
     });
 })();
