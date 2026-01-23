@@ -9,6 +9,7 @@ import { existsSync } from 'fs';
 import cron from 'node-cron';
 import us from 'microseconds';
 import isPortInUse from './modules/getAvailablePort.ts';
+import { RawData, WebSocketServer } from 'ws';
 
 const IS_DEV = process.argv[2] === "--dev";
 
@@ -35,6 +36,29 @@ function coloringStatus(status: number) {
     ][Math.floor(status / 100)];
 }
 
+function rawDataToBuffer(data: RawData): Buffer {
+    if (Buffer.isBuffer(data)) {
+        return data;
+    }
+
+    if (Array.isArray(data)) {
+        // ws가 fragment를 Buffer[]로 주는 경우
+        return Buffer.concat(data);
+    }
+
+    if (data instanceof ArrayBuffer) {
+        return Buffer.from(data);
+    }
+
+    if (typeof data === "string") {
+        return Buffer.from(data, "utf-8");
+    }
+
+    // 타입상 도달 불가하지만 안전장치
+    throw new TypeError("Unsupported WebSocket RawData type");
+}
+
+
 const parseUs = (us: number) => {
     if (us >= 1000000) {
         return Math.round(us / 1000000) + "s";
@@ -57,11 +81,9 @@ app.use(async (req, res, next) => {
         }
 
         //@ts-ignore
-        const middleware = await import("./middleware.ts");
+        const middleware: any = await import("./middleware.ts");
 
         if (
-            !middleware.Middleware ||
-            !middleware.matches ||
             typeof middleware.Middleware !== "function" ||
             typeof middleware.matches !== "string"
         ) {
@@ -239,8 +261,126 @@ const addRoutes = async (str: string) => {
 
     await addRoutes(path.join(__dirname, "./routes"));
 
-    app.listen(config.port, () => {
+    const svr = app.listen(config.port, () => {
         logger.log("Server listening on port " + config.port.toString().green);
         logger.log("- http://127.0.0.1:" + config.port);
     });
+
+    const wss = new WebSocketServer({ "noServer": true });
+
+    //@ts-ignore
+    const isocket: InternalWebSocketFileStruct = await import("./websocket.ts");
+    const isSocketAvailable = existsSync("./websocket.ts");
+
+    svr.on("upgrade", async (req, socket, head) => {
+        if (!isSocketAvailable) {
+            logger.error("websocket.ts doesn't exist.");
+            socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+            socket.destroy();
+            return;
+        }
+
+        //@ts-ignore
+        const isocket: InternalWebSocketFileStruct = await import("./websocket.ts");
+
+        if (
+            ("Open" in isocket && typeof isocket.Open !== "function") ||
+            ("Connection" in isocket && typeof isocket.Connection !== "function") ||
+            ("Message" in isocket && typeof isocket.Message !== "function") ||
+            ("Error" in isocket && typeof isocket.Error !== "function") ||
+            ("Close" in isocket && typeof isocket.Close !== "function") ||
+            typeof isocket.path !== "string"
+        ) {
+            logger.error("websocket.ts was corrupt. Check README.md");
+            socket.write("HTTP/1.1 500 Internal Server Error\r\n\r\n");
+            socket.destroy();
+            return;
+        }
+
+        const { url } = req;
+        if (!url?.startsWith(isocket.path)) {
+            socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+            socket.destroy();
+            return;
+        }
+
+        if (config.id && config.pw) {
+            if (!req.headers["authorization"]) {
+                logger.error(`GET ${isocket.path} ${coloringStatus(401)}`);
+                socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+                socket.destroy();
+                return;
+            }
+
+            const [_, base64] = req.headers["authorization"].split(" ");
+            const [id, password] = atob(base64).split(":");
+
+            if (id !== config.id || password !== config.pw) {
+                logger.error(`GET ${isocket.path} ${coloringStatus(403)}`);
+                socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+                socket.destroy();
+                return;
+            }
+        }
+
+        wss.handleUpgrade(req, socket, head, (ws) => {
+            logger.log(`GET ${isocket.path} ${coloringStatus(101)}`);
+            wss.emit('connection', ws, req);
+        });
+    });
+
+    wss.on("connection", async (ws, req) => {
+        const ip = (req.headers["x-forwarded-for"] || req.socket.remoteAddress) as string;
+        const secWsKey = req.headers["sec-websocket-key"];
+
+        isocket.Connection?.({
+            ws,
+            secWsKey,
+            ip
+        });
+
+        ws.on("open", () => {
+            isocket.Open?.(ws);
+        });
+
+        ws.on("close", (code, reason) => {
+            isocket.Close?.({
+                code,
+                "reason": Buffer.from(reason).toString("utf-8")
+            });
+        });
+
+        ws.on("message", (data) => {
+            isocket.Message?.({
+                ws,
+                "data": rawDataToBuffer(data),
+                "send": (data) => {
+                    if (typeof data === "object") {
+                        ws.send(JSON.stringify(data), (err) => {
+                            if (!err) return;
+                            isocket.Error?.(err);
+                        });
+                        return;
+                    }
+
+                    ws.send(data, (err) => {
+                        if (!err) return;
+                        isocket.Error?.(err);
+                    });
+                }
+            })
+        });
+
+        ws.on("error", (error) => {
+            isocket.Error?.(error);
+        });
+    });
+
+    wss.on("wsClientError", (err, socket, req) => {
+        isocket.WsClientError?.({
+            err,
+            socket,
+            req
+        });
+    })
 })();
