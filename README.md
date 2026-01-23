@@ -62,7 +62,7 @@ routes/
 
 생성되는 API 루트는 다음과 같습니다.  
 - index.ts -> /
-- route.ts -> /route.ts
+- route.ts -> /route
 - folder/...path.ts -> /folder/:path
 
 `! Dynamic Route는 ...name.ts로 생성할 수 있으며 이 경우엔 req.params.name으로 불러올 수 있습니다.`
@@ -136,3 +136,99 @@ middleware.ts는 항상 Middleware와 matches를 export해야하며,
 Middleware는 function, matches는 string이여야합니다.  
 
 matches는 wildcard가 될 수 있습니다.  
+
+## 웹소켓
+
+websocket.ts는 API에서 웹소켓 연결을 사용 가능하게 만들 수 있습니다.  
+예시 폴더 구조
+```
+./
+└── websocket.ts
+```
+
+websocket.ts는 path 문자열을 export해야합니다.  
+
+```typescript
+export const path = "/socket";
+```
+
+websocket.ts는 Open, Connection, Message, Error, Close, WsClientError 함수를 반환할 수 있습니다.  
+
+### Open
+
+```typescript
+import { WebSocket } from 'ws';
+
+export async function Open(ws: WebSocket) {
+    // 코드
+}
+
+export const path = "/socket";
+```
+
+### Connection
+
+```typescript
+export async function Connection({
+    ws, // WebSocket 타입
+    ip, // string? 타입
+    secWsKey // string? 타입
+}) {
+    // 코드
+}
+
+export const path = "/socket";
+```
+### Message
+
+```typescript
+export async function Connection({
+    ws, // WebSocket 타입
+    data, // string | Buffer 타입
+    send, // (data: any) => any 타입 (JSON도 자동으로 string으로 변환해서 send)
+}) {
+    // 코드
+}
+
+export const path = "/socket";
+```
+
+### Error
+
+```typescript
+export async function Error(err: Error) {
+    // 코드
+}
+
+export const path = "/socket";
+```
+
+### Close
+
+```typescript
+export async function Close({
+    code, // number 타입
+    reason // string 타입
+}) {
+    // 코드
+}
+
+export const path = "/socket";
+```
+
+### WsClientError
+
+```typescript
+import { IncomingMessage } from "http";
+import Stream from "stream";
+
+export async function WsClientError({
+    err, // Error 타입
+    socket, // Stream.Duplex 타입
+    req // IncomingMessage 타입
+}) {
+    // 코드
+}
+
+export const path = "/socket";
+```

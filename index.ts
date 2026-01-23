@@ -268,9 +268,11 @@ const addRoutes = async (str: string) => {
 
     const wss = new WebSocketServer({ "noServer": true });
 
-    //@ts-ignore
-    const isocket: InternalWebSocketFileStruct = await import("./websocket.ts");
     const isSocketAvailable = existsSync("./websocket.ts");
+    let isocket: InternalWebSocketFileStruct;
+    if (isSocketAvailable)
+        //@ts-ignore
+        isocket = await import("./websocket.ts");
 
     svr.on("upgrade", async (req, socket, head) => {
         if (!isSocketAvailable) {
