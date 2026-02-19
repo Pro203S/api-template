@@ -10,7 +10,6 @@ import cron from 'node-cron';
 import us from 'microseconds';
 import { RawData, WebSocketServer } from 'ws';
 import { createServer } from 'net';
-import os from 'os';
 import { internalIpV4 } from 'internal-ip';
 
 const IS_DEV = process.argv[2] === "--dev";
