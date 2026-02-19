@@ -24,7 +24,7 @@ export type RequesterResponse<S = any, E = any> = RequesterSuccessResponse<S> | 
  * 429 처리가 되는 axios
  * @param config 
  */
-export async function Request<SuccessBody = any, ErrBody = any, D = any>(config: RequesterConfig<D>): Promise<RequesterResponse<SuccessBody, ErrBody>> {
+export async function RequestToAPI<SuccessBody = any, ErrBody = any, D = any>(config: RequesterConfig<D>): Promise<RequesterResponse<SuccessBody, ErrBody>> {
     const logger = new Logger("Requester");
 
     let params = new URLSearchParams(config.params).toString();
@@ -42,7 +42,7 @@ export async function Request<SuccessBody = any, ErrBody = any, D = any>(config:
         if (status === 429 && (config.handle429 ?? true)) {
             const retry_after = (r.data["retry_after"] * 1000) + 100;
             await new Promise((v) => setTimeout(v, retry_after));
-            return Request<SuccessBody, ErrBody, D>(config);
+            return RequestToAPI<SuccessBody, ErrBody, D>(config);
         }
 
         return {

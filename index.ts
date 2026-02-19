@@ -155,67 +155,88 @@ const addRoutes = async (str: string) => {
             )
         ).replaceAll("\\", "/");
 
-        app.use(appRoute, async (req, res) => {
-            const date = us.now();
-            try {
-                if (config.id && config.pw) {
-                    if (!req.headers["authorization"]) {
-                        if (config.browserLogin) return res.setHeader("WWW-Authenticate", `Basic realm="Check", charset="UTF-8"`)
-                            .status(401)
-                            .json({
-                                "code": 401,
-                                "message": "Unauthorized"
-                            });
+        const imported = (await import(path.join(
+            str, pathName
+        )));
 
-                        return res.status(401)
-                            .json({
-                                "code": 401,
-                                "message": "Unauthorized"
-                            });;
+        const methods = Object.keys(imported);
+        const availableMethods: string[] = [];
+
+        for (const method of methods) {
+            const m = method.toLocaleLowerCase();
+            if (
+                m !== "get" &&
+                m !== "post" &&
+                m !== "put" &&
+                m !== "delete"
+            ) continue;
+
+            const callback: (...params: any[]) => any = imported[method];
+            availableMethods.push(m);
+
+            app[m](appRoute, async (req, res) => {
+                const date = us.now();
+                try {
+                    if (
+                        (config.id && config.pw) ||
+                        !appRoute.includes("/account/apple") ||
+                        !appRoute.includes("/account/google")
+                    ) {
+                        if (!req.headers["authorization"]) {
+                            if (config.browserLogin) return res.setHeader("WWW-Authenticate", `Basic realm="Check", charset="UTF-8"`)
+                                .status(401)
+                                .json({
+                                    "code": 401,
+                                    "message": "Unauthorized"
+                                });
+
+                            logResponse(req.originalUrl, req.method, 401, `[${parseUs(us.now() - date)}]`);
+                            return res.status(401)
+                                .json({
+                                    "code": 401,
+                                    "message": "Unauthorized"
+                                });;
+                        }
+
+                        const [_, base64] = req.headers["authorization"].split(" ");
+                        const [id, password] = atob(base64).split(":");
+
+                        if (id !== config.id || password !== config.pw) {
+                            logResponse(req.originalUrl, req.method, 403, `[${parseUs(us.now() - date)}]`);
+                            return res.status(403).json({ "code": 403, "message": "Forbidden" });
+                        }
                     }
 
-                    const [_, base64] = req.headers["authorization"].split(" ");
-                    const [id, password] = atob(base64).split(":");
+                    const r = await callback(req, res);
+                    logResponse(req.originalUrl, req.method, r.statusCode, `[${parseUs(us.now() - date)}]`);
+                } catch (err: any) {
+                    const e = err as Error;
+                    if (e.message.includes("Cannot find module")) {
+                        logResponse(req.originalUrl, req.method, 404, `[${parseUs(us.now() - date)}]`);
+                        res.status(404).json({
+                            "code": 404,
+                            "message": "API Not Found"
+                        });
+                        return;
+                    }
 
-                    if (id !== config.id || password !== config.pw) return res.status(403).json({ "code": 403, "message": "Forbidden" });
-                }
-
-                const imported = (await import(path.join(
-                    str, req.path
-                )));
-                const method = imported[req.method.toLocaleUpperCase()];
-
-                if (!method) return res.status(405).json({ "code": 405, "message": "Method Not Allowed" });
-
-                const r = await method(req, res);
-                logResponse(req.originalUrl, req.method, r.statusCode, `[${parseUs(us.now() - date)}]`);
-            } catch (err: any) {
-                const e = err as Error;
-                if (e.message.includes("Cannot find module")) {
-                    logResponse(req.originalUrl, req.method, 404, `[${parseUs(us.now() - date)}]`);
-                    res.status(404).json({
-                        "code": 404,
-                        "message": "Not Found"
+                    if (res.headersSent || res.writableEnded) {
+                        const s = res.statusCode;
+                        logResponse(req.originalUrl, req.method, s, `[${parseUs(us.now() - date)}]`);
+                        return;
+                    }
+                    logResponse(req.originalUrl, req.method, 500, `[${parseUs(us.now() - date)}]`);
+                    res.status(500).json({
+                        "code": 500,
+                        "message": e.message
                     });
+                    logger.error("An error occurred when serving " + appRoute);
+                    logger.error(e.message);
                     return;
                 }
-
-                if (res.headersSent || res.writableEnded) {
-                    const s = res.statusCode;
-                    logResponse(req.originalUrl, req.method, s, `[${parseUs(us.now() - date)}]`);
-                    return;
-                }
-                logResponse(req.originalUrl, req.method, 500, `[${parseUs(us.now() - date)}]`);
-                res.status(500).json({
-                    "code": 500,
-                    "message": e.message
-                });
-                logger.error("An error occurred when serving " + appRoute);
-                logger.error(e.message);
-                return;
-            }
-        });
-        logger.log(`Loaded ${appRoute}`);
+            });
+        }
+        logger.log(`Loaded ${appRoute} ${`[${availableMethods.map(v => v.toLocaleUpperCase()).join(", ")}]`.gray}`);
     }
 };
 
