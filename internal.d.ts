@@ -1,5 +1,6 @@
 import { IncomingMessage } from "http";
 import Stream from "stream";
+import { WebSocket } from "ws";
 
 declare global {
     type InternalWebSocketFileStruct = {
