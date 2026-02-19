@@ -42,6 +42,7 @@ config.ts는 서버 환경설정 파일입니다.
 |browserLogin|boolean?|API 서버에 브라우저로 요청을 보낼 때 로그인 팝업을 띄울 지 여부입니다.|
 |staticPath|string?|정적으로 보낼 폴더입니다. (상대 경로)|
 |expressSettings|{ [key: string]: any }|Express.js의 설정입니다.|
+|bypassAuthorize|string[]?|ID와 비밀번호가 필요하지 않은 API 루트 목록입니다.|
 
 id와 pw가 설정되어있으면 API로 요청을 보낼 때 Basic Authorization 헤더를 보내야 합니다.  
 id 또는 pw가 맞지 않으면 403을 반환합니다.  
