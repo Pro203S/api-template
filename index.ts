@@ -8,8 +8,8 @@ import Logger from './modules/logger.ts';
 import { existsSync } from 'fs';
 import cron from 'node-cron';
 import us from 'microseconds';
-import isPortInUse from './modules/getAvailablePort.ts';
 import { RawData, WebSocketServer } from 'ws';
+import { createServer } from 'net';
 
 const IS_DEV = process.argv[2] === "--dev";
 
@@ -21,9 +21,27 @@ dotenv.config({
 const app = express();
 app.use(express.json());
 app.use(express.text());
+app.use(express.urlencoded({ "extended": true }));
 
 const logger = new Logger("API");
 logger.log(`Starting ${config.name}...`);
+
+function isPortInUse(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
+        const tester = createServer()
+            .once('error', (err: any) => {
+                if (err.code === 'EADDRINUSE') {
+                    resolve(true); // 포트 사용 중
+                } else {
+                    resolve(false); // 다른 에러는 사용 가능으로 취급
+                }
+            })
+            .once('listening', () => {
+                tester.close(() => resolve(false)); // 사용 가능
+            })
+            .listen(port);
+    });
+}
 
 function coloringStatus(status: number) {
     return [
