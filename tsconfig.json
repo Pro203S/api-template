@@ -5,6 +5,7 @@
     "outDir": "./dist",
     "types": [
       "./declaration.d.ts",
+      "./internal.d.ts",
       "node"
     ],
     "module": "CommonJS",
