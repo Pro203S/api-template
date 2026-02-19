@@ -297,7 +297,7 @@ const addRoutes = async (str: string) => {
             }
         }
     } else {
-        logger.log("schedules directory not found!");
+        logger.warn("schedules directory not found!");
     }
     //#endregion
 
