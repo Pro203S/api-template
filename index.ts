@@ -10,6 +10,8 @@ import cron from 'node-cron';
 import us from 'microseconds';
 import { RawData, WebSocketServer } from 'ws';
 import { createServer } from 'net';
+import os from 'os';
+import { internalIpV4 } from 'internal-ip';
 
 const IS_DEV = process.argv[2] === "--dev";
 
@@ -24,8 +26,9 @@ app.use(express.text());
 app.use(express.urlencoded({ "extended": true }));
 
 const logger = new Logger("API");
-logger.log(`Starting ${config.name}...`);
+logger.log(`Starting ${config.name.cyan}...`);
 
+//#region 내부 함수들
 function isPortInUse(port: number): Promise<boolean> {
     return new Promise((resolve) => {
         const tester = createServer()
@@ -76,7 +79,6 @@ function rawDataToBuffer(data: RawData): Buffer {
     throw new TypeError("Unsupported WebSocket RawData type");
 }
 
-
 const parseUs = (us: number) => {
     if (us >= 1000000) {
         return Math.round(us / 1000000) + "s";
@@ -90,6 +92,7 @@ const parseUs = (us: number) => {
 }
 
 const logResponse = (path: string, method: string, status: number, time: string) => logger.log(`${method} ${path} ${coloringStatus(status)} ` + time.gray);
+//#endregion
 
 app.use(async (req, res, next) => {
     try {
@@ -178,9 +181,8 @@ const addRoutes = async (str: string) => {
                 const date = us.now();
                 try {
                     if (
-                        (config.id && config.pw) ||
-                        !appRoute.includes("/account/apple") ||
-                        !appRoute.includes("/account/google")
+                        (config.id && config.pw) &&
+                        (config.bypassAuthorize && !config.bypassAuthorize.includes(appRoute))
                     ) {
                         if (!req.headers["authorization"]) {
                             if (config.browserLogin) return res.setHeader("WWW-Authenticate", `Basic realm="Check", charset="UTF-8"`)
@@ -241,6 +243,7 @@ const addRoutes = async (str: string) => {
 };
 
 (async () => {
+    //#region 초기 설정
     if (await isPortInUse(config.port)) {
         logger.error("This port is in use: " + config.port.toString().red);
         process.exit(1);
@@ -257,15 +260,17 @@ const addRoutes = async (str: string) => {
             const value = config.expressSettings[key];
             app.set(key, value);
 
-            logger.log(`Set ${key} to ${value}`);
+            logger.log(`Set ${key.green} to ${String(value).green}`);
         }
 
         if (IS_DEV) {
-            logger.log("Set etag to false");
             app.set("etag", false);
+            logger.log(`Set ${"etag".green} to ${"false".green}`);
         }
     }
+    //#endregion
 
+    //#region 스케쥴
     logger.log("Loading schedules...");
 
     if (existsSync("./schedules")) {
@@ -284,7 +289,7 @@ const addRoutes = async (str: string) => {
                 }
 
                 cron.schedule(schedule.interval, schedule.Schedule);
-                logger.log("Scheduled schedules/" + scheduleFile);
+                logger.log("Scheduled " + ("schedules/" + scheduleFile).green);
                 schedule.Schedule();
             } catch (err) {
                 const e = err as Error;
@@ -295,16 +300,21 @@ const addRoutes = async (str: string) => {
     } else {
         logger.log("schedules directory not found!");
     }
+    //#endregion
 
+    //#region 루트
     logger.log("Loading routes...");
 
     await addRoutes(path.join(__dirname, "./routes"));
+    //#endregion
 
-    const svr = app.listen(config.port, () => {
+    const svr = app.listen(config.port, async () => {
         logger.log("Server listening on port " + config.port.toString().green);
         logger.log("- http://127.0.0.1:" + config.port);
+        logger.log("- http://" + await internalIpV4() + ":" + config.port);
     });
 
+    //#region 웹소켓
     const wss = new WebSocketServer({ "noServer": true });
 
     const isSocketAvailable = existsSync("./websocket.ts");
@@ -423,5 +433,6 @@ const addRoutes = async (str: string) => {
             socket,
             req
         });
-    })
+    });
+    //#endregion
 })();

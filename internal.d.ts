@@ -48,6 +48,8 @@ declare global {
          */
         staticPath?: string;
         expressSettings?: { [key: string]: any };
+
+        bypassAuthorize?: string[];
     }
 }
 

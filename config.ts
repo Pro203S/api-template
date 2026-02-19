@@ -8,7 +8,11 @@ const config: ServerConfig = {
 
     "expressSettings": {
         "x-powered-by": false
-    }
+    },
+
+    "bypassAuthorize": [
+        "/"
+    ]
 };
 
 export default config;
