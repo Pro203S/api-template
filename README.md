@@ -63,7 +63,7 @@ routes/
 생성되는 API 루트는 다음과 같습니다.  
 - index.ts -> /
 - route.ts -> /route
-- folder/...path.ts -> /folder/:path
+- folder/$path.ts -> /folder/:path
 
 `! Dynamic Route는 ...name.ts로 생성할 수 있으며 이 경우엔 req.params.name으로 불러올 수 있습니다.`
 

@@ -154,7 +154,7 @@ const addRoutes = async (str: string) => {
             path.join(
                 routePath.replace(path.join(__dirname, "./routes"), ""),
                 "..",
-                pathName.replace("index", "").replace("...", ":")
+                pathName.replace("index", "").replace("$", ":")
             )
         ).replaceAll("\\", "/");
 
