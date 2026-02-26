@@ -2,15 +2,12 @@ import colors from 'colors';
 
 export default class Logger {
     private _category?: string;
-    private _disable?: boolean;
 
     constructor(category: string) {
         this._category = category;
-        this._disable = process.argv[2] !== "--dev";
     }
 
-    public log(message: string, important?: boolean) {
-        if (this._disable && !important) return;
+    public log(message: string) {
         console.log(`${colors.magenta(`[${this._category}]`)} ${message}`);
     }
     public warn(message: string) {
