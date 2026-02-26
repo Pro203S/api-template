@@ -7,8 +7,8 @@
   "type": "commonjs",
   "main": "index.ts",
   "scripts": {
-    "start": "ts-node index.ts",
-    "dev": "nodemon -e ts -x \"ts-node index.ts --dev\""
+    "start": "bun index.ts",
+    "dev": "nodemon -e ts -x \"bun index.ts --dev\""
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

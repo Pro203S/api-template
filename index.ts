@@ -1,3 +1,5 @@
+console.log("Booting...");
+
 import express from 'express';
 import * as fs from 'fs/promises';
 import * as path from 'path';
