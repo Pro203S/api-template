@@ -66,7 +66,7 @@ routes/
 - route.ts -> /route
 - folder/$path.ts -> /folder/:path
 
-`! Dynamic Route는 ...name.ts로 생성할 수 있으며 이 경우엔 req.params.name으로 불러올 수 있습니다.`
+`! Dynamic Route는 $name.ts로 생성할 수 있으며 이 경우엔 req.params.name으로 불러올 수 있습니다.`
 
 API 루트의 예시 코드  
 ```typescript
