@@ -13,6 +13,7 @@ import us from 'microseconds';
 import { RawData, WebSocketServer } from 'ws';
 import { createServer } from 'net';
 import { internalIpV4 } from 'internal-ip';
+import ApiError from './modules/error.ts';
 
 const IS_DEV = process.argv[2] === "--dev";
 
@@ -110,7 +111,7 @@ app.use(async (req, res, next) => {
             typeof middleware.matches !== "string"
         ) {
             logger.error("middleware.ts was corrupt. Check README.md");
-            return res.status(500).send("middleware.ts was corrupt.");
+            return ApiError(res, 500, "middleware.ts was corrupt.");
         }
 
         const isMatch = wcmatch(middleware.matches);
@@ -194,11 +195,7 @@ const addRoutes = async (str: string) => {
                                 });
 
                             logResponse(req.originalUrl, req.method, 401, `[${parseUs(us.now() - date)}]`);
-                            return res.status(401)
-                                .json({
-                                    "code": 401,
-                                    "message": "Unauthorized"
-                                });;
+                            return ApiError(res, 401);
                         }
 
                         const [_, base64] = req.headers["authorization"].split(" ");
@@ -206,7 +203,7 @@ const addRoutes = async (str: string) => {
 
                         if (id !== config.id || password !== config.pw) {
                             logResponse(req.originalUrl, req.method, 403, `[${parseUs(us.now() - date)}]`);
-                            return res.status(403).json({ "code": 403, "message": "Forbidden" });
+                            return ApiError(res, 403);
                         }
                     }
 
@@ -216,11 +213,7 @@ const addRoutes = async (str: string) => {
                     const e = err as Error;
                     if (e.message.includes("Cannot find module")) {
                         logResponse(req.originalUrl, req.method, 404, `[${parseUs(us.now() - date)}]`);
-                        res.status(404).json({
-                            "code": 404,
-                            "message": "API Not Found"
-                        });
-                        return;
+                        return ApiError(res, 404);
                     }
 
                     if (res.headersSent || res.writableEnded) {
@@ -229,10 +222,7 @@ const addRoutes = async (str: string) => {
                         return;
                     }
                     logResponse(req.originalUrl, req.method, 500, `[${parseUs(us.now() - date)}]`);
-                    res.status(500).json({
-                        "code": 500,
-                        "message": e.message
-                    });
+                    ApiError(res, 500, e.message);
                     logger.error("An error occurred when serving " + appRoute);
                     logger.error(e.message);
                     return;
