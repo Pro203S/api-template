@@ -1,9 +1,9 @@
 # modules
 node_modules/
 package-lock.json
-bun.lock
 
 # env files
 *.env*
 
 .DS_Store
+bun.lock

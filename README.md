@@ -1,235 +1,126 @@
 # API
 
-- 개인용 Express.js API 템플릿
-- dotenv 내장
+개인용 Elysia + Bun API 템플릿입니다. 파일 기반 라우팅, dotenv, Basic 인증, 정적 파일 제공, 스케줄, 미들웨어를 지원합니다.
 
 ## 시작하기
 
-1. `git clone https://github.com/Pro203S/api-template`로 이 레포지토리를 복사합니다.
-2. `npm i --save`로 필요한 모듈을 설치합니다.
-3. `npm run start`로 서버를 실행하거나 `npm run dev`로 개발 서버를 실행합니다.
+[Bun](https://bun.sh)이 필요합니다.
 
-`개발 서버랑 프로덕션 서버의 차이점은 express의 etag 활성화 여부, dotenv debug 활성화 여부가 있습니다. 사실 별로 없어요`
+```sh
+git clone https://github.com/Pro203S/api-template apiname
+cd apiname
+bun install
+bun run start
+```
 
-## config.ts 수정
+개발 서버는 `bun run dev`로 실행합니다. TypeScript 파일 변경 시 서버를 재시작하며 dotenv 디버그 로그를 활성화합니다.
+
+```sh
+bun test
+bun run typecheck
+```
+
+## config.ts
 
 ```ts
 interface ServerConfig {
     name: string;
     port: number;
-
     id?: string;
     pw?: string;
     browserLogin?: boolean;
-
-    /**
-     * 현재 디렉토리의 상대 경로
-     */
     staticPath?: string;
-    expressSettings?: { [key: string]: any };
+    bypassAuthorize?: string[];
 }
 ```
 
-config.ts는 서버 환경설정 파일입니다.  
-아래의 설정을 할 수 있습니다.  
+| 설정 | 설명 |
+| --- | --- |
+| name | 로그에 표시할 서버 이름 |
+| port | 서버 포트 |
+| id, pw | 둘 다 설정하면 API 라우트에 Basic 인증 적용 |
+| browserLogin | 인증 헤더가 없을 때 브라우저 로그인용 WWW-Authenticate 헤더 반환 |
+| staticPath | 프로젝트 디렉토리 기준 정적 파일 폴더. URL의 `/` 아래에 공개 |
+| bypassAuthorize | 인증을 생략할 라우트 경로 목록. 기본값은 빈 목록 |
 
-|설정 이름|타입|설명|
-|--------|--------|--------|
-|name|string|서버의 이름입니다.|
-|port|number|서버의 포트입니다.|
-|id|string?|API 서버에 요청을 보낼 때 필요한 ID입니다.|
-|pw|string?|API 서버에 요청을 보낼 때 필요한 비밀번호입니다.|
-|browserLogin|boolean?|API 서버에 브라우저로 요청을 보낼 때 로그인 팝업을 띄울 지 여부입니다.|
-|staticPath|string?|정적으로 보낼 폴더입니다. (상대 경로)|
-|expressSettings|{ [key: string]: any }|Express.js의 설정입니다.|
-|bypassAuthorize|string[]?|ID와 비밀번호가 필요하지 않은 API 루트 목록입니다.|
+인증 헤더가 없으면 401, 형식이 잘못되었거나 인증 정보가 틀리면 403을 반환합니다. 비밀번호에 `:`를 포함할 수 있습니다.
+`bypassAuthorize`에는 `/items/:id`처럼 등록된 라우트 경로를 지정합니다. 정적 파일은 API 인증 없이 공개됩니다.
 
-id와 pw가 설정되어있으면 API로 요청을 보낼 때 Basic Authorization 헤더를 보내야 합니다.  
-id 또는 pw가 맞지 않으면 403을 반환합니다.  
-Authorization 헤더가 제공되지 않으면 401을 반환합니다.  
-browserLogin이 true일 때 WWW-Authenticate 헤더를 반환합니다.  
-browserLogin이 false일 때 아무 헤더도 반환하지 않습니다.  
+## API 라우트
 
-## API 루트 생성
+`routes` 폴더의 TypeScript 파일을 재귀적으로 불러옵니다.
 
-routes 디렉토리에 TypeScript 파일을 만들거나 폴더를 만들어 API 루트를 생성합니다.
-```
+```text
 routes/
-├── index.ts
-├── route.ts
-└── folder/
-    └── ...path.ts
+├── index.ts          → /
+├── route.ts          → /route
+└── items/
+    ├── index.ts      → /items
+    └── $id.ts        → /items/:id
 ```
 
-생성되는 API 루트는 다음과 같습니다.  
-- index.ts -> /
-- route.ts -> /route
-- folder/$path.ts -> /folder/:path
+`GET`, `POST`, `PUT`, `DELETE`, `PATCH`, `HEAD`, `OPTIONS` 함수를 export합니다. `.d.ts`, `.test.ts`, `.spec.ts` 파일은 라우트로 불러오지 않습니다.
 
-`! Dynamic Route는 $name.ts로 생성할 수 있으며 이 경우엔 req.params.name으로 불러올 수 있습니다.`
+핸들러는 `req: Req`를 받고 응답할 값을 반환합니다. 객체는 JSON으로 변환됩니다. `Req`는 `declaration.d.ts`에 선언된 전역 타입으로, Elysia의 요청 컨텍스트를 확장하며 별도 import 없이 사용할 수 있습니다. 공용 쿠키 타입도 이 선언에서 확장할 수 있습니다.
 
-API 루트의 예시 코드  
-```typescript
-import { Request, Response } from "express";
-
-export function GET(req: Request, res: Response) {
-    return res.status(200).send("Hello GET!");
+```ts
+export function GET(req: Req) {
+    return { id: req.params.id, search: req.query.search };
 }
 
-export async function POST(req: Request, res: Response) {
-    return res.status(200).send("Hello POST!");
+export async function POST(req: Req) {
+    req.set.status = 201;
+    return { created: req.body };
 }
 ```
 
-API 루트는 메서드 이름을 export해야 합니다. (export 하지 않으면 405 오류 발생)  
-export되는 메서드는 Promise 타입을 반환할 수 있습니다.  
+요청은 `req.request`, 파싱된 본문은 `req.body`, 경로 파라미터는 `req.params`, 쿼리는 `req.query`, 헤더는 `req.headers`로 접근합니다.
+응답 상태와 헤더는 `req.set.status`, `req.set.headers`로 설정합니다. `Response`를 직접 반환할 수도 있습니다.
 
-## Schedules
+### 오류 응답
 
-API에서 일정 주기마다 실행될 함수입니다.  
+```ts
+import ApiError from "../modules/error.ts";
 
-예시 폴더 구조  
+export function GET(req: Req) {
+    return ApiError(req.set, 400, "잘못된 요청입니다.");
+}
 ```
-schedules/
-└── template.ts
+
+오류 형식은 `{ code: number, message: string }`입니다. 처리되지 않은 예외는 500, 존재하지 않는 경로는 404, 본문 파싱 오류는 400을 반환합니다.
+
+## 미들웨어
+
+프로젝트 루트에 `middleware.ts`를 만들고 `Middleware` 함수와 `matches` 문자열을 export합니다.
+
+```ts
+export async function Middleware(req: Req) {
+    if (req.query.block) {
+        req.set.status = 403;
+        return { code: 403, message: "Forbidden" };
+    }
+    req.set.headers["x-api"] = "template";
+}
+
+export const matches = "/items/*";
 ```
 
-예시 코드  
-```typescript
-import Logger from "../modules/logger";
+`matches`는 wildcard 패턴입니다. 미들웨어는 본문 파싱 후, 라우트 인증 및 핸들러 실행 전에 동작합니다.
+응답 값을 반환하면 처리를 종료하고, 아무 값도 반환하지 않으면 다음 단계로 진행합니다. `next()` 호출은 필요하지 않습니다.
+미들웨어 모듈은 서버 시작 시 불러오며 변경 사항은 재시작 후 적용됩니다.
+
+## 스케줄
+
+`schedules` 폴더의 TypeScript 파일에서 `Schedule` 함수와 `interval` 문자열을 export합니다.
+
+```ts
+import Logger from "../modules/logger.ts";
 
 export async function Schedule() {
     new Logger("Schedule").log("Schedule");
 }
 
-// https://github.com/node-cron/node-cron#cron-syntax
 export const interval = "* 5 * * * *";
 ```
 
-export되는 요소는 항상 Schedule과 interval이여야 하며,  
-Schedule은 function, interval은 string이여야 합니다.  
-
-interval의 작성법은 [node-cron 문법](https://github.com/node-cron/node-cron#cron-syntax)을 참고하세요.
-
-`! 서버가 실행될때 한 번 실행되고 그 후 interval 간격으로 실행됩니다.`
-
-## 미들웨어
-
-middleware.ts는 API의 루트에 있어야 합니다.  
-예시 폴더 구조
-```
-./
-└── middleware.ts
-```
-
-예시 코드  
-```typescript
-import { NextFunction, Request, Response } from "express";
-
-export async function Middleware(req: Request, res: Response, next: NextFunction) {
-    next();
-}
-
-export const matches = "/*";
-```
-
-middleware.ts는 항상 Middleware와 matches를 export해야하며,  
-Middleware는 function, matches는 string이여야합니다.  
-
-matches는 wildcard가 될 수 있습니다.  
-
-## 웹소켓
-
-websocket.ts는 API에서 웹소켓 연결을 사용 가능하게 만들 수 있습니다.  
-예시 폴더 구조
-```
-./
-└── websocket.ts
-```
-
-websocket.ts는 path 문자열을 export해야합니다.  
-
-```typescript
-export const path = "/socket";
-```
-
-websocket.ts는 Open, Connection, Message, Error, Close, WsClientError 함수를 반환할 수 있습니다.  
-
-### Open
-
-```typescript
-import { WebSocket } from 'ws';
-
-export async function Open(ws: WebSocket) {
-    // 코드
-}
-
-export const path = "/socket";
-```
-
-### Connection
-
-```typescript
-export async function Connection({
-    ws, // WebSocket 타입
-    ip, // string? 타입
-    secWsKey // string? 타입
-}) {
-    // 코드
-}
-
-export const path = "/socket";
-```
-### Message
-
-```typescript
-export async function Connection({
-    ws, // WebSocket 타입
-    data, // string | Buffer 타입
-    send, // (data: any) => any 타입 (JSON도 자동으로 string으로 변환해서 send)
-}) {
-    // 코드
-}
-
-export const path = "/socket";
-```
-
-### Error
-
-```typescript
-export async function Error(err: Error) {
-    // 코드
-}
-
-export const path = "/socket";
-```
-
-### Close
-
-```typescript
-export async function Close({
-    code, // number 타입
-    reason // string 타입
-}) {
-    // 코드
-}
-
-export const path = "/socket";
-```
-
-### WsClientError
-
-```typescript
-import { IncomingMessage } from "http";
-import Stream from "stream";
-
-export async function WsClientError({
-    err, // Error 타입
-    socket, // Stream.Duplex 타입
-    req // IncomingMessage 타입
-}) {
-    // 코드
-}
-
-export const path = "/socket";
-```
+서버 시작 시 한 번 실행한 후 [node-cron 문법](https://github.com/node-cron/node-cron#cron-syntax)에 따라 반복합니다.

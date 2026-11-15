@@ -1,429 +1,153 @@
-console.log("Booting...");
+import { Elysia, type AnyElysia, type HTTPMethod } from "elysia";
+import { staticPlugin } from "@elysiajs/static";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { existsSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import dotenv from "dotenv";
+import wcmatch from "wildcard-match";
+import cron from "node-cron";
+import { internalIpV4 } from "internal-ip";
+import config from "./config.ts";
+import Logger from "./modules/logger.ts";
+import ApiError from "./modules/error.ts";
 
-import express from 'express';
-import * as fs from 'fs/promises';
-import * as path from 'path';
-import dotenv from 'dotenv';
-import wcmatch from 'wildcard-match';
-import config from './config.ts';
-import Logger from './modules/logger.ts';
-import { existsSync } from 'fs';
-import cron from 'node-cron';
-import us from 'microseconds';
-import { RawData, WebSocketServer } from 'ws';
-import { createServer } from 'net';
-import { internalIpV4 } from 'internal-ip';
-import ApiError from './modules/error.ts';
-
-const IS_DEV = process.argv[2] === "--dev";
-
-dotenv.config({
-    "debug": IS_DEV,
-    "quiet": !IS_DEV
-});
-
-const app = express();
-app.use(express.json());
-app.use(express.text());
-app.use(express.urlencoded({ "extended": true }));
-
+const IS_DEV = process.argv.includes("--dev");
 const logger = new Logger("API");
-logger.log(`Starting ${config.name.cyan}...`);
+type RouteHandler = (req: Req) => unknown | Promise<unknown>;
+type MiddlewareModule = { Middleware: RouteHandler; matches: string };
+const methods = new Set(["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]);
 
-//#region 내부 함수들
-function isPortInUse(port: number): Promise<boolean> {
-    return new Promise((resolve) => {
-        const tester = createServer()
-            .once('error', (err: any) => {
-                if (err.code === 'EADDRINUSE') {
-                    resolve(true); // 포트 사용 중
-                } else {
-                    resolve(false); // 다른 에러는 사용 가능으로 취급
-                }
-            })
-            .once('listening', () => {
-                tester.close(() => resolve(false)); // 사용 가능
-            })
-            .listen(port);
-    });
+function parseTime(milliseconds: number): string {
+    if (milliseconds >= 1000) return Math.round(milliseconds / 1000) + "s";
+    if (milliseconds >= 1) return Math.round(milliseconds) + "ms";
+    return Math.round(milliseconds * 1000) + "μs";
 }
 
-function coloringStatus(status: number) {
-    return [
-        ``, // 000
-        `${status}`.gray, // 100
-        `${status}`.green, // 200
-        `${status}`.cyan, // 300
-        `${status}`.yellow, // 400
-        `${status}`.red // 500
-    ][Math.floor(status / 100)];
+function authorize(req: Req, settings: ServerConfig, route: string) {
+    if (!settings.id || !settings.pw || settings.bypassAuthorize?.includes(route)) return;
+    const authorization = req.headers.authorization;
+    if (!authorization) {
+        if (settings.browserLogin) req.set.headers["WWW-Authenticate"] = 'Basic realm="Check", charset="UTF-8"';
+        return ApiError(req.set, 401);
+    }
+    const match = /^Basic\s+([A-Za-z0-9+/]+={0,2})$/i.exec(authorization);
+    if (!match) return ApiError(req.set, 403);
+    const credentials = Buffer.from(match[1], "base64").toString("utf8");
+    const separator = credentials.indexOf(":");
+    if (separator < 0 || credentials.slice(0, separator) !== settings.id || credentials.slice(separator + 1) !== settings.pw) return ApiError(req.set, 403);
 }
 
-function rawDataToBuffer(data: RawData): Buffer {
-    if (Buffer.isBuffer(data)) {
-        return data;
-    }
-
-    if (Array.isArray(data)) {
-        // ws가 fragment를 Buffer[]로 주는 경우
-        return Buffer.concat(data);
-    }
-
-    if (data instanceof ArrayBuffer) {
-        return Buffer.from(data);
-    }
-
-    if (typeof data === "string") {
-        return Buffer.from(data, "utf-8");
-    }
-
-    // 타입상 도달 불가하지만 안전장치
-    throw new TypeError("Unsupported WebSocket RawData type");
-}
-
-const parseUs = (us: number) => {
-    if (us >= 1000000) {
-        return Math.round(us / 1000000) + "s";
-    }
-
-    if (us >= 1000) {
-        return Math.round(us / 1000) + "ms";
-    }
-
-    return Math.round(us) + "μs";
-}
-
-const logResponse = (path: string, method: string, status: number, time: string) => logger.log(`${method} ${path} ${coloringStatus(status)} ` + time.gray);
-//#endregion
-
-app.use(async (req, res, next) => {
-    try {
-        if (!existsSync("./middleware.ts")) {
-            // 미들웨어 파일 없으면 그냥 다음으로
-            return next();
-        }
-
-        //@ts-ignore
-        const middleware: any = await import("./middleware.ts");
-
-        if (
-            typeof middleware.Middleware !== "function" ||
-            typeof middleware.matches !== "string"
-        ) {
-            logger.error("middleware.ts was corrupt. Check README.md");
-            return ApiError(res, 500, "middleware.ts was corrupt.");
-        }
-
-        const isMatch = wcmatch(middleware.matches);
-
-        // 매치 안 되면 그냥 다음 라우트로 넘김
-        if (!isMatch(req.path)) {
-            return next();
-        }
-
-        const date = us.now();
-        // 매치되면 사용자 미들웨어 실행
-        await middleware.Middleware(req, res, next);
-
-        // 이미 응답이 나갔으면 로그만 찍고 끝
-        if (res.headersSent || res.writableEnded) {
-            const s = res.statusCode;
-            logResponse(req.path, req.method, s, `[${parseUs(us.now() - date)}]`);
-            return;
-        }
-
-        return;
-    } catch (err) {
-        const e = err as Error;
-        logger.error(e.message);
-    }
-});
-
-const addRoutes = async (str: string) => {
-    const routes = await fs.readdir(str, 'utf-8');
-
-    for await (let route of routes) {
-        const routePath = path.join(str, route);
-        const isFile = (await fs.lstat(routePath)).isFile();
-
-        if (!isFile) {
-            await addRoutes(routePath);
+async function addRoutes(app: AnyElysia, directory: string, settings: ServerConfig, root = directory): Promise<void> {
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+        const filename = path.join(directory, entry.name);
+        if (entry.isDirectory()) {
+            await addRoutes(app, filename, settings, root);
             continue;
         }
-
-        const pathName = path.basename(routePath, ".ts");
-        const appRoute = path.normalize(
-            path.join(
-                routePath.replace(path.join(__dirname, "./routes"), ""),
-                "..",
-                pathName.replace("index", "").replace("$", ":")
-            )
-        ).replaceAll("\\", "/");
-
-        const imported = (await import(path.join(
-            str, pathName
-        )));
-
-        const methods = Object.keys(imported);
+        if (!entry.isFile() || !entry.name.endsWith(".ts") || /\.(?:d|test|spec)\.ts$/.test(entry.name)) continue;
+        const segments = path.relative(root, filename).replaceAll("\\", "/").slice(0, -3).split("/");
+        if (segments.at(-1) === "index") segments.pop();
+        const route = "/" + segments.map(segment => segment.startsWith("$") ? ":" + segment.slice(1) : segment).join("/");
+        const imported = await import(pathToFileURL(filename).href) as Record<string, unknown>;
         const availableMethods: string[] = [];
+        for (const [name, callback] of Object.entries(imported)) {
+            const method = name.toUpperCase();
+            if (!methods.has(method) || typeof callback !== "function") continue;
+            app.route(method as HTTPMethod, route, async (context) => {
+                const error = authorize(context as Req, settings, route);
+                if (error) return error;
+                return await (callback as RouteHandler)(context as Req);
+            });
+            availableMethods.push(method);
+        }
+        logger.log(`Loaded ${route} [${availableMethods.join(", ")}]`);
+    }
+}
 
-        for (const method of methods) {
-            const m = method.toLocaleLowerCase();
-            if (
-                m !== "get" &&
-                m !== "post" &&
-                m !== "put" &&
-                m !== "delete"
-            ) continue;
+export async function createApp(settings: ServerConfig = config, root = import.meta.dir) {
+    let middleware: MiddlewareModule | undefined;
+    const middlewarePath = path.join(root, "middleware.ts");
+    if (existsSync(middlewarePath)) {
+        const imported = await import(pathToFileURL(middlewarePath).href);
+        if (typeof imported.Middleware !== "function" || typeof imported.matches !== "string") throw new Error("middleware.ts was corrupt. Check README.md");
+        middleware = imported as MiddlewareModule;
+    }
+    const matches = middleware ? wcmatch(middleware.matches) : undefined;
+    const startTimes = new WeakMap<Request, number>();
+    const app = new Elysia()
+        .onRequest(({ request }) => {
+            startTimes.set(request, performance.now());
+        })
+        .onBeforeHandle(async (context) => {
+            if (middleware && matches?.(context.path)) return await middleware.Middleware(context as Req);
+        })
+        .onError(({ code, error, set }) => {
+            if (code === "NOT_FOUND") return ApiError(set, 404);
+            if (code === "PARSE") return ApiError(set, 400);
+            if (code === "VALIDATION") return ApiError(set, 422);
+            const message = error instanceof Error ? error.message : String(error);
+            logger.error(message);
+            return ApiError(set, 500, message);
+        })
+        .onAfterResponse(({ request, set }) => {
+            const started = startTimes.get(request);
+            const status = typeof set.status === "number" ? set.status : 200;
+            const url = new URL(request.url);
+            logger.log(`${request.method} ${url.pathname}${url.search} ${status} [${parseTime(performance.now() - (started ?? performance.now()))}]`);
+            startTimes.delete(request);
+        });
+    if (settings.staticPath) {
+        const assets = path.resolve(root, settings.staticPath);
+        logger.log("Static path set to: " + assets);
+        app.use(await staticPlugin({ assets, prefix: "/" }));
+    }
+    await addRoutes(app, path.join(root, "routes"), settings);
+    return app;
+}
 
-            const callback: (...params: any[]) => any = imported[method];
-            availableMethods.push(m);
-
-            app[m](appRoute, async (req, res) => {
-                const date = us.now();
+async function loadSchedules(root: string) {
+    logger.log("Loading schedules...");
+    const directory = path.join(root, "schedules");
+    if (!existsSync(directory)) {
+        logger.warn("schedules directory not found!");
+        return;
+    }
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+        if (!entry.isFile() || !entry.name.endsWith(".ts") || entry.name.endsWith(".d.ts")) continue;
+        try {
+            const schedule = await import(pathToFileURL(path.join(directory, entry.name)).href);
+            if (typeof schedule.Schedule !== "function" || typeof schedule.interval !== "string") throw new Error("Schedule and interval exports are required. Check README.md");
+            cron.schedule(schedule.interval, async () => {
                 try {
-                    if (
-                        (config.id && config.pw) &&
-                        (config.bypassAuthorize && !config.bypassAuthorize.includes(appRoute))
-                    ) {
-                        if (!req.headers["authorization"]) {
-                            if (config.browserLogin) return res.setHeader("WWW-Authenticate", `Basic realm="Check", charset="UTF-8"`)
-                                .status(401)
-                                .json({
-                                    "code": 401,
-                                    "message": "Unauthorized"
-                                });
-
-                            logResponse(req.originalUrl, req.method, 401, `[${parseUs(us.now() - date)}]`);
-                            return ApiError(res, 401);
-                        }
-
-                        const [_, base64] = req.headers["authorization"].split(" ");
-                        const [id, password] = atob(base64).split(":");
-
-                        if (id !== config.id || password !== config.pw) {
-                            logResponse(req.originalUrl, req.method, 403, `[${parseUs(us.now() - date)}]`);
-                            return ApiError(res, 403);
-                        }
-                    }
-
-                    const r = await callback(req, res);
-                    logResponse(req.originalUrl, req.method, r.statusCode, `[${parseUs(us.now() - date)}]`);
-                } catch (err: any) {
-                    const e = err as Error;
-                    if (e.message.includes("Cannot find module")) {
-                        logResponse(req.originalUrl, req.method, 404, `[${parseUs(us.now() - date)}]`);
-                        return ApiError(res, 404);
-                    }
-
-                    if (res.headersSent || res.writableEnded) {
-                        const s = res.statusCode;
-                        logResponse(req.originalUrl, req.method, s, `[${parseUs(us.now() - date)}]`);
-                        return;
-                    }
-                    logResponse(req.originalUrl, req.method, 500, `[${parseUs(us.now() - date)}]`);
-                    ApiError(res, 500, e.message);
-                    logger.error("An error occurred when serving " + appRoute);
-                    logger.error(e.message);
-                    return;
+                    await schedule.Schedule();
+                } catch (error) {
+                    logger.error(`Schedule ${entry.name}: ${error instanceof Error ? error.message : String(error)}`);
                 }
             });
+            logger.log("Scheduled schedules/" + entry.name);
+            await schedule.Schedule();
+        } catch (error) {
+            logger.error(`An error occurred when loading schedules/${entry.name}`);
+            logger.error(error instanceof Error ? error.message : String(error));
         }
-        logger.log(`Loaded ${appRoute} ${`[${availableMethods.map(v => v.toLocaleUpperCase()).join(", ")}]`.gray}`);
     }
-};
+}
 
-(async () => {
-    //#region 초기 설정
-    if (await isPortInUse(config.port)) {
-        logger.error("This port is in use: " + config.port.toString().red);
+if (import.meta.main) {
+    console.log("Booting...");
+    dotenv.config({ debug: IS_DEV, quiet: !IS_DEV });
+    try {
+        logger.log(`Starting ${config.name}...`);
+        const app = await createApp();
+        await loadSchedules(import.meta.dir);
+        app.listen(config.port);
+        logger.log("Server listening on port " + config.port);
+        logger.log("- http://127.0.0.1:" + config.port);
+        const ip = await internalIpV4();
+        if (ip) logger.log("- http://" + ip + ":" + config.port);
+    } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);
     }
-
-    if (config.staticPath) {
-        logger.log("Static path set to: " + path.join(__dirname, config.staticPath).toString().yellow);
-        app.use(express.static(path.join(__dirname, config.staticPath)));
-    }
-
-    if (config.expressSettings) {
-        const keys = Object.keys(config.expressSettings);
-        for (const key of keys) {
-            const value = config.expressSettings[key];
-            app.set(key, value);
-
-            logger.log(`Set ${key.green} to ${String(value).green}`);
-        }
-
-        if (IS_DEV) {
-            app.set("etag", false);
-            logger.log(`Set ${"etag".green} to ${"false".green}`);
-        }
-    }
-    //#endregion
-
-    //#region 스케쥴
-    logger.log("Loading schedules...");
-
-    if (existsSync("./schedules")) {
-        const schedules = await fs.readdir("./schedules", "utf-8");
-        for await (const scheduleFile of schedules) {
-            try {
-                const schedule = await import(`./schedules/${scheduleFile}`);
-                if (
-                    !schedule.Schedule ||
-                    !schedule.interval ||
-                    typeof schedule.Schedule !== "function" ||
-                    typeof schedule.interval !== "string"
-                ) {
-                    logger.error("schedules/" + schedule + " was corrupt. Check README.md");
-                    return;
-                }
-
-                cron.schedule(schedule.interval, schedule.Schedule);
-                logger.log("Scheduled " + ("schedules/" + scheduleFile).green);
-                schedule.Schedule();
-            } catch (err) {
-                const e = err as Error;
-                logger.error(`An error occurred when loading schedules/${scheduleFile}`);
-                logger.error(e.message);
-            }
-        }
-    } else {
-        logger.warn("schedules directory not found!");
-    }
-    //#endregion
-
-    //#region 루트
-    logger.log("Loading routes...");
-
-    await addRoutes(path.join(__dirname, "./routes"));
-    //#endregion
-
-    const svr = app.listen(config.port, async () => {
-        logger.log("Server listening on port " + config.port.toString().green);
-        logger.log("- http://127.0.0.1:" + config.port);
-        logger.log("- http://" + await internalIpV4() + ":" + config.port);
-    });
-
-    //#region 웹소켓
-    const wss = new WebSocketServer({ "noServer": true });
-
-    const isSocketAvailable = existsSync("./websocket.ts");
-    let isocket: InternalWebSocketFileStruct;
-    if (isSocketAvailable)
-        //@ts-ignore
-        isocket = await import("./websocket.ts");
-
-    svr.on("upgrade", async (req, socket, head) => {
-        if (!isSocketAvailable) {
-            logger.error("websocket.ts doesn't exist.");
-            socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
-            socket.destroy();
-            return;
-        }
-
-        //@ts-ignore
-        const isocket: InternalWebSocketFileStruct = await import("./websocket.ts");
-
-        if (
-            ("Open" in isocket && typeof isocket.Open !== "function") ||
-            ("Connection" in isocket && typeof isocket.Connection !== "function") ||
-            ("Message" in isocket && typeof isocket.Message !== "function") ||
-            ("Error" in isocket && typeof isocket.Error !== "function") ||
-            ("Close" in isocket && typeof isocket.Close !== "function") ||
-            typeof isocket.path !== "string"
-        ) {
-            logger.error("websocket.ts was corrupt. Check README.md");
-            socket.write("HTTP/1.1 500 Internal Server Error\r\n\r\n");
-            socket.destroy();
-            return;
-        }
-
-        const { url } = req;
-        if (!url?.startsWith(isocket.path)) {
-            socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
-            socket.destroy();
-            return;
-        }
-
-        if (config.id && config.pw) {
-            if (!req.headers["authorization"]) {
-                logger.error(`GET ${isocket.path} ${coloringStatus(401)}`);
-                socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
-                socket.destroy();
-                return;
-            }
-
-            const [_, base64] = req.headers["authorization"].split(" ");
-            const [id, password] = atob(base64).split(":");
-
-            if (id !== config.id || password !== config.pw) {
-                logger.error(`GET ${isocket.path} ${coloringStatus(403)}`);
-                socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
-                socket.destroy();
-                return;
-            }
-        }
-
-        wss.handleUpgrade(req, socket, head, (ws) => {
-            logger.log(`GET ${isocket.path} ${coloringStatus(101)}`);
-            wss.emit('connection', ws, req);
-        });
-    });
-
-    wss.on("connection", async (ws, req) => {
-        const ip = (req.headers["x-forwarded-for"] || req.socket.remoteAddress) as string;
-        const secWsKey = req.headers["sec-websocket-key"];
-
-        isocket.Connection?.({
-            ws,
-            secWsKey,
-            ip
-        });
-
-        ws.on("open", () => {
-            isocket.Open?.(ws);
-        });
-
-        ws.on("close", (code, reason) => {
-            isocket.Close?.({
-                code,
-                "reason": Buffer.from(reason).toString("utf-8")
-            });
-        });
-
-        ws.on("message", (data) => {
-            isocket.Message?.({
-                ws,
-                "data": rawDataToBuffer(data),
-                "send": (data) => {
-                    if (typeof data === "object") {
-                        ws.send(JSON.stringify(data), (err) => {
-                            if (!err) return;
-                            isocket.Error?.(err);
-                        });
-                        return;
-                    }
-
-                    ws.send(data, (err) => {
-                        if (!err) return;
-                        isocket.Error?.(err);
-                    });
-                }
-            })
-        });
-
-        ws.on("error", (error) => {
-            isocket.Error?.(error);
-        });
-    });
-
-    wss.on("wsClientError", (err, socket, req) => {
-        isocket.WsClientError?.({
-            err,
-            socket,
-            req
-        });
-    });
-    //#endregion
-})();
+}

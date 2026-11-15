@@ -6,10 +6,6 @@ const config: ServerConfig = {
     //"pw": "asdf",
     //"browserLogin": true,
 
-    "expressSettings": {
-        "x-powered-by": false
-    },
-
     "bypassAuthorize": [
         "/"
     ]

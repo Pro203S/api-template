@@ -1,18 +1,15 @@
 {
-  "compilerOptions": {
-    "declaration": true,
-    "esModuleInterop": true,
-    "outDir": "./dist",
-    "types": [
-      "./declaration.d.ts",
-      "./internal.d.ts",
-      "node"
-    ],
-    "module": "CommonJS",
-    "target": "ESNext",
-    "strict": true,
-    "resolveJsonModule": true,
-    "allowImportingTsExtensions": true,
-    "noEmit": true
-  }
+    "compilerOptions": {
+        "esModuleInterop": true,
+        "outDir": "./dist",
+        "types": ["./declaration.d.ts", "./internal.d.ts", "bun"],
+        "module": "ESNext",
+        "moduleResolution": "Bundler",
+        "target": "ESNext",
+        "strict": true,
+        "skipLibCheck": true,
+        "resolveJsonModule": true,
+        "allowImportingTsExtensions": true,
+        "noEmit": true
+    }
 }
